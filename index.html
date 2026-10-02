@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>QR Scanner</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&display=swap">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#f2f0f8;--card:#fff;--ink:#1c1733;--muted:#6b6585;--line:#dcd8ea;--accent:#5b3df5;--accent-ink:#fff;--ok:#12805c;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#12101c;--card:#1c1930;--ink:#efecfa;--muted:#9d97b8;--line:#2f2b49;--accent:#8c78ff;--accent-ink:#12101c;--ok:#4cd6a3;}}
+:root[data-theme="dark"]{--bg:#12101c;--card:#1c1930;--ink:#efecfa;--muted:#9d97b8;--line:#2f2b49;--accent:#8c78ff;--accent-ink:#12101c;--ok:#4cd6a3;}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 Sora,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:520px;margin:0 auto;padding:20px 16px 32px}
+h1{font-size:1.5rem;margin:0 0 4px;letter-spacing:-.02em}
+.sub{color:var(--muted);margin:0 0 18px;font-size:.9rem}
+.viewer{position:relative;aspect-ratio:3/4;max-height:70vh;width:100%;background:#000;border-radius:20px;overflow:hidden}
+video{width:100%;height:100%;object-fit:cover;display:block}
+video.mirror{transform:scaleX(-1)}
+.idle{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:#cfcae6;text-align:center;padding:24px;font-size:.9rem}
+.frame{position:absolute;left:50%;top:50%;width:62%;aspect-ratio:1;transform:translate(-50%,-50%);pointer-events:none;display:none}
+.viewer.live .frame{display:block}
+.viewer.live .idle{display:none}
+.frame i{position:absolute;width:26px;height:26px;border:4px solid #fff;border-radius:6px}
+.frame i:nth-child(1){left:0;top:0;border-right:0;border-bottom:0}
+.frame i:nth-child(2){right:0;top:0;border-left:0;border-bottom:0}
+.frame i:nth-child(3){left:0;bottom:0;border-right:0;border-top:0}
+.frame i:nth-child(4){right:0;bottom:0;border-left:0;border-top:0}
+.viewer.hit .frame i{border-color:#4cd6a3}
+.badge{position:absolute;left:12px;top:12px;background:rgba(0,0,0,.55);color:#fff;font-size:.75rem;padding:4px 10px;border-radius:99px;display:none}
+.viewer.live .badge{display:block}
+.row{display:flex;gap:10px;margin-top:14px}
+button,.btn{font:600 .95rem Sora,system-ui,sans-serif;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:14px;padding:12px 14px;cursor:pointer;flex:1;text-align:center;min-height:48px}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:not-allowed}
+:is(button,.btn,select,a):focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+select{width:100%;margin-top:10px;font:inherit;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.msg{margin-top:14px;font-size:.9rem;color:var(--muted)}
+.msg.err{color:#c0392b}
+.result{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}
+.result h2{font-size:.85rem;margin:0 0 6px;color:var(--ok)}
+.val{word-break:break-all;font-size:1rem;margin:0 0 12px}
+.result .row{margin-top:0}
+.hist{margin-top:22px}
+.hist h3{font-size:.95rem;margin:0 0 8px}
+.hist ul{list-style:none;margin:0;padding:0}
+.hist li{padding:10px 0;border-top:1px solid var(--line);word-break:break-all;font-size:.88rem;display:flex;justify-content:space-between;gap:10px}
+.hist li span{color:var(--muted);white-space:nowrap;font-size:.75rem}
+.hidden{display:none!important}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<main>
+  <h1>QR scanner</h1>
+  <p class="sub">Point your camera at a QR code. Switch between front and back cameras any time.</p>
+
+  <div class="viewer" id="viewer">
+    <video id="video" playsinline muted></video>
+    <div class="idle" id="idle"><strong>Camera is off</strong><span>Tap Start camera and allow access.</span></div>
+    <div class="frame"><i></i><i></i><i></i><i></i></div>
+    <div class="badge" id="badge">Back camera</div>
+  </div>
+
+  <div class="row">
+    <button class="primary" id="toggle">Start camera</button>
+    <button id="flip" disabled>Switch camera</button>
+  </div>
+  <select id="devices" class="hidden" aria-label="Choose camera"></select>
+  <div class="row">
+    <label class="btn" for="file">Scan from image</label>
+    <input type="file" id="file" accept="image/*" class="hidden">
+  </div>
+  <p class="msg" id="msg" role="status"></p>
+
+  <section class="result hidden" id="result" aria-live="polite">
+    <h2>QR code found</h2>
+    <p class="val" id="val"></p>
+    <div class="row">
+      <button id="copy">Copy</button>
+      <button id="open" class="hidden">Open link</button>
+    </div>
+  </section>
+
+  <section class="hist hidden" id="hist">
+    <h3>Recent scans</h3>
+    <ul id="list"></ul>
+  </section>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.min.js"></script>
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id)};
+  var video=$('video'),viewer=$('viewer'),msg=$('msg'),toggle=$('toggle'),flip=$('flip'),
+      devSel=$('devices'),badge=$('badge');
+  var canvas=document.createElement('canvas'),ctx=canvas.getContext('2d',{willReadFrequently:true});
+  var stream=null,facing='environment',deviceId=null,raf=0,lastText='',lastTime=0,history=[];
+
+  function say(t,err){msg.textContent=t||'';msg.className='msg'+(err?' err':'')}
+
+  async function listDevices(){
+    try{
+      var all=await navigator.mediaDevices.enumerateDevices();
+      var cams=all.filter(function(d){return d.kind==='videoinput'});
+      devSel.innerHTML='';
+      cams.forEach(function(c,i){
+        var o=document.createElement('option');
+        o.value=c.deviceId;o.textContent=c.label||('Camera '+(i+1));
+        devSel.appendChild(o);
+      });
+      devSel.classList.toggle('hidden',cams.length<3);
+      flip.disabled=cams.length<2 && !/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+      return cams;
+    }catch(e){return[]}
+  }
+
+  async function start(){
+    stop(true);
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      say('This browser cannot access the camera. Use Scan from image instead.',true);return;
+    }
+    say('Starting camera…');
+    var video_c=deviceId?{deviceId:{exact:deviceId}}:{facingMode:{ideal:facing}};
+    video_c.width={ideal:1280};video_c.height={ideal:720};
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({video:video_c,audio:false});
+    }catch(e){
+      if(e&&e.name==='OverconstrainedError'&&deviceId){deviceId=null;return start();}
+      var m='Could not open the camera.';
+      if(e&&e.name==='NotAllowedError')m='Camera access was blocked. Allow it in your browser settings, or use Scan from image.';
+      else if(e&&e.name==='NotFoundError')m='No camera found on this device. Use Scan from image instead.';
+      else if(e&&e.name==='NotReadableError')m='The camera is in use by another app.';
+      say(m,true);toggle.textContent='Start camera';return;
+    }
+    var track=stream.getVideoTracks()[0],s=track.getSettings?track.getSettings():{};
+    if(s.facingMode)facing=s.facingMode==='user'?'user':'environment';
+    if(s.deviceId)deviceId=s.deviceId;
+    video.srcObject=stream;
+    video.classList.toggle('mirror',facing==='user');
+    badge.textContent=facing==='user'?'Front camera':'Back camera';
+    await video.play().catch(function(){});
+    viewer.classList.add('live');
+    toggle.textContent='Stop camera';
+    say('Looking for a QR code…');
+    var cams=await listDevices();
+    if(s.deviceId)devSel.value=s.deviceId;
+    flip.disabled=cams.length<2&&!/Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
+    raf=requestAnimationFrame(tick);
+  }
+
+  function stop(keepMsg){
+    cancelAnimationFrame(raf);
+    if(stream){stream.getTracks().forEach(function(t){t.stop()});stream=null}
+    video.srcObject=null;
+    viewer.classList.remove('live','hit');
+    toggle.textContent='Start camera';
+    if(!keepMsg)say('');
+  }
+
+  function tick(){
+    if(!stream)return;
+    if(video.readyState>=2&&video.videoWidth){
+      var w=video.videoWidth,h=video.videoHeight,scale=Math.min(1,640/Math.max(w,h));
+      canvas.width=Math.round(w*scale);canvas.height=Math.round(h*scale);
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      var img=ctx.getImageData(0,0,canvas.width,canvas.height);
+      var code=jsQR(img.data,img.width,img.height,{inversionAttempts:'dontInvert'});
+      if(code&&code.data)found(code.data);
+    }
+    raf=requestAnimationFrame(tick);
+  }
+
+  function found(text){
+    var now=Date.now();
+    if(text===lastText&&now-lastTime<2500){lastTime=now;return}
+    lastText=text;lastTime=now;
+    viewer.classList.add('hit');setTimeout(function(){viewer.classList.remove('hit')},900);
+    if(navigator.vibrate)try{navigator.vibrate(60)}catch(e){}
+    show(text);
+  }
+
+  function isUrl(t){return /^https?:\/\/[^\s]+$/i.test(t)}
+
+  function show(text){
+    $('val').textContent=text;
+    $('result').classList.remove('hidden');
+    $('open').classList.toggle('hidden',!isUrl(text));
+    $('open').onclick=function(){window.open(text,'_blank','noopener,noreferrer')};
+    $('copy').textContent='Copy';
+    $('copy').onclick=function(){
+      var done=function(){$('copy').textContent='Copied'};
+      if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done,function(){fallbackCopy(text);done()})}
+      else{fallbackCopy(text);done()}
+    };
+    history.unshift({t:text,at:new Date()});
+    history=history.filter(function(x,i,a){return a.findIndex(function(y){return y.t===x.t})===i}).slice(0,8);
+    var ul=$('list');ul.innerHTML='';
+    history.forEach(function(x){
+      var li=document.createElement('li'),a=document.createElement('div'),s=document.createElement('span');
+      a.textContent=x.t;s.textContent=x.at.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      li.appendChild(a);li.appendChild(s);ul.appendChild(li);
+    });
+    $('hist').classList.remove('hidden');
+    say('Scan complete. Keep scanning or stop the camera.');
+  }
+
+  function fallbackCopy(t){
+    var ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy')}catch(e){}
+    document.body.removeChild(ta);
+  }
+
+  toggle.addEventListener('click',function(){stream?stop():start()});
+
+  flip.addEventListener('click',function(){
+    facing=facing==='user'?'environment':'user';
+    deviceId=null; // use facingMode so the switch is predictable
+    start();
+  });
+
+  devSel.addEventListener('change',function(){deviceId=devSel.value;start()});
+
+  $('file').addEventListener('change',function(e){
+    var f=e.target.files&&e.target.files[0];if(!f)return;
+    var url=URL.createObjectURL(f),im=new Image();
+    im.onload=function(){
+      var s=Math.min(1,1200/Math.max(im.width,im.height));
+      canvas.width=Math.round(im.width*s);canvas.height=Math.round(im.height*s);
+      ctx.drawImage(im,0,0,canvas.width,canvas.height);
+      var d=ctx.getImageData(0,0,canvas.width,canvas.height);
+      var code=jsQR(d.data,d.width,d.height,{inversionAttempts:'attemptBoth'});
+      URL.revokeObjectURL(url);
+      if(code&&code.data){lastText='';show(code.data)}else say('No QR code found in that image.',true);
+    };
+    im.onerror=function(){say('Could not read that image.',true)};
+    im.src=url;e.target.value='';
+  });
+
+  document.addEventListener('visibilitychange',function(){if(document.hidden&&stream)stop()});
+})();
+</script>
+</body>
+</html>
